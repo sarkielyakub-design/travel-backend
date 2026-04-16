@@ -14,7 +14,7 @@ def init_admin():
             name="Super Admin",
             email="admin@myhamdala.com",
             password=hash_password("admin123"),
-            role="admin"
+            role="admin",
             is_verified=True
         )
         db.add(admin)
