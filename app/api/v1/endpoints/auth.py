@@ -1,14 +1,29 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from datetime import datetime, timedelta
+import random
+
 from app.db.session import SessionLocal
 from app.models.user import User
 from app.schemas.auth import LoginSchema
-from app.schemas.user import UserCreate, UserLogin
-from app.core.security import hash_password, verify_password, create_access_token
+from app.schemas.user import UserCreate
+from app.core.security import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    decode_token,
+)
+
+from app.services.email import send_email
+from app.api.deps import get_token
+from app.models.token_blacklist import TokenBlacklist
 
 router = APIRouter()
 
 
+# =========================
+# DB
+# =========================
 def get_db():
     db = SessionLocal()
     try:
@@ -17,12 +32,9 @@ def get_db():
         db.close()
 
 
-import random
-
-from app.services.email import send_email
-import random
-from datetime import datetime, timedelta
-
+# =========================
+# REGISTER
+# =========================
 @router.post("/register")
 def register(user: UserCreate, db: Session = Depends(get_db)):
 
@@ -35,15 +47,15 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     new_user = User(
         name=user.name,
         email=user.email,
-        password=hash_password(user.password),
+        password=hash_password(user.password),  # ✅ SAFE
         otp=otp,
-        otp_expires_at=datetime.utcnow() + timedelta(minutes=5)
+        otp_expires_at=datetime.utcnow() + timedelta(minutes=5),
+        is_verified=False
     )
 
     db.add(new_user)
     db.commit()
 
-    # ✅ SEND EMAIL
     send_email(
         to_email=user.email,
         subject="Verify your account",
@@ -51,8 +63,14 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     )
 
     return {"message": "OTP sent to email"}
+
+
+# =========================
+# VERIFY OTP
+# =========================
 @router.post("/verify")
 def verify(email: str, otp: str, db: Session = Depends(get_db)):
+
     user = db.query(User).filter(User.email == email).first()
 
     if not user or user.otp != otp:
@@ -63,9 +81,15 @@ def verify(email: str, otp: str, db: Session = Depends(get_db)):
 
     db.commit()
 
-    return {"message": "Verified"}
+    return {"message": "Account verified"}
+
+
+# =========================
+# FORGOT PASSWORD
+# =========================
 @router.post("/forgot-password")
 def forgot(email: str, db: Session = Depends(get_db)):
+
     user = db.query(User).filter(User.email == email).first()
 
     if not user:
@@ -84,20 +108,30 @@ def forgot(email: str, db: Session = Depends(get_db)):
     )
 
     return {"message": "OTP sent"}
+
+
+# =========================
+# RESET PASSWORD
+# =========================
 @router.post("/reset-password")
 def reset(email: str, otp: str, new_password: str, db: Session = Depends(get_db)):
+
     user = db.query(User).filter(User.email == email).first()
 
     if not user or user.otp != otp:
         raise HTTPException(400, "Invalid OTP")
 
-    user.password = hash_password(new_password)
+    user.password = hash_password(new_password)  # ✅ SAFE
     user.otp = None
 
     db.commit()
 
     return {"message": "Password updated"}
 
+
+# =========================
+# LOGIN
+# =========================
 @router.post("/login")
 def login(data: LoginSchema, db: Session = Depends(get_db)):
 
@@ -106,9 +140,12 @@ def login(data: LoginSchema, db: Session = Depends(get_db)):
     if not user or not verify_password(data.password, user.password):
         raise HTTPException(401, "Invalid credentials")
 
+    if not user.is_verified:
+        raise HTTPException(403, "Account not verified")
+
     token = create_access_token({
         "sub": user.email,
-        "role": user.role,   # ✅ IMPORTANT
+        "role": user.role,
     })
 
     return {
@@ -121,26 +158,34 @@ def login(data: LoginSchema, db: Session = Depends(get_db)):
             "is_admin": user.role == "admin"
         }
     }
-from sqlalchemy.orm import Session
-from app.api.deps import get_db, get_token
-from app.models.token_blacklist import TokenBlacklist
 
+
+# =========================
+# LOGOUT
+# =========================
 @router.post("/logout")
 def logout(
     token: str = Depends(get_token),
     db: Session = Depends(get_db)
 ):
+
     blacklisted = TokenBlacklist(token=token)
     db.add(blacklisted)
     db.commit()
 
     return {"message": "Logged out successfully"}
+
+
+# =========================
+# REFRESH TOKEN
+# =========================
 @router.post("/refresh")
 def refresh(token: str = Depends(get_token)):
+
     payload = decode_token(token)
 
-    if payload.get("type") != "refresh":
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    if not payload or payload.get("type") != "refresh":
+        raise HTTPException(401, "Invalid refresh token")
 
     new_access = create_access_token({"sub": payload.get("sub")})
 
