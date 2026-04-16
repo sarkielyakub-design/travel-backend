@@ -15,6 +15,7 @@ def init_admin():
             email="admin@myhamdala.com",
             password=hash_password("admin123"),
             role="admin"
+            is_verified=True
         )
         db.add(admin)
         db.commit()
