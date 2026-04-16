@@ -15,10 +15,15 @@ def init_admin():
             email="admin@myhamdala.com",
             password=hash_password("admin123"),
             role="admin",
-            is_verified=True
+            is_verified=True  # ✅ FIXED
         )
         db.add(admin)
-        db.commit()
         print("🔥 Admin created: admin@myhamdala.com / admin123")
 
+    else:
+        # 🔥 VERY IMPORTANT (fix existing admin)
+        admin.is_verified = True
+        print("✅ Admin already exists → forced verified")
+
+    db.commit()
     db.close()
