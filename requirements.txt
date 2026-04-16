@@ -9,3 +9,4 @@ alembic
 pydantic[email]
 pydantic-settings
 fastapi-mail
+python-multipart
