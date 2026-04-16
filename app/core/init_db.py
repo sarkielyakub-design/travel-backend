@@ -7,17 +7,17 @@ from app.core.security import hash_password
 def init_admin():
     db: Session = SessionLocal()
 
-    admin = db.query(User).filter(User.email == "admin@maitagaran.com").first()
+    admin = db.query(User).filter(User.email == "admin@myhamdala.com").first()
 
     if not admin:
         admin = User(
             name="Super Admin",
-            email="admin@maitagaran.com",
+            email="admin@myhamdala.com",
             password=hash_password("admin123"),
             role="admin"
         )
         db.add(admin)
         db.commit()
-        print("🔥 Admin created: admin@maitagaran.com / admin123")
+        print("🔥 Admin created: admin@myhamdala.com / admin123")
 
     db.close()
