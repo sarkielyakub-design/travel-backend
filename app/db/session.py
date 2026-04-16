@@ -1,9 +1,12 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-DATABASE_URL = "sqlite:///./test.db"  # or your DB
+DATABASE_URL = "sqlite:///./new.db"  # ✅ fresh DB
 
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False}
+)
 
 SessionLocal = sessionmaker(
     autocommit=False,
@@ -11,5 +14,4 @@ SessionLocal = sessionmaker(
     bind=engine
 )
 
-# ✅ ADD THIS (VERY IMPORTANT)
 Base = declarative_base()
