@@ -6,11 +6,15 @@ from app.models.package import Package
 
 router = APIRouter(prefix="/packages", tags=["Public"])
 
-
 @router.get("")
 def get_packages(db: Session = Depends(get_db)):
-    return db.query(Package).all()
+    packages = db.query(Package).all()
 
+    return {
+        "success": True,
+        "count": len(packages),
+        "data": packages
+    }
 
 @router.get("/{package_id}")
 def get_package(package_id: int, db: Session = Depends(get_db)):
