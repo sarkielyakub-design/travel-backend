@@ -40,30 +40,23 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 
     existing = db.query(User).filter(User.email == user.email).first()
     if existing:
-        raise HTTPException(400, "Email already exists")
-
-    otp = str(random.randint(100000, 999999))
+        raise HTTPException(status_code=400, detail="Email already exists")
 
     new_user = User(
         name=user.name,
         email=user.email,
-        password=hash_password(user.password),  # ✅ SAFE
-        otp=otp,
-        otp_expires_at=datetime.utcnow() + timedelta(minutes=5),
-        is_verified=False
+        password=hash_password(user.password),
+        is_verified=True  # ✅ AUTO VERIFY
     )
 
     db.add(new_user)
     db.commit()
+    db.refresh(new_user)
 
-    send_email(
-        to_email=user.email,
-        subject="Verify your account",
-        body=f"Your OTP is: {otp}\nThis expires in 5 minutes."
-    )
-
-    return {"message": "OTP sent to email"}
-
+    return {
+        "message": "Account created successfully",
+        "user_id": new_user.id
+    }
 
 # =========================
 # VERIFY OTP
