@@ -14,7 +14,7 @@ def initialize_payment(email: str, amount: int, reference: str):
         "email": email,
         "amount": int(amount * 100),  # 🔥 Paystack uses kobo
         "reference": reference,
-        "callback_url": "http://localhost:3000/payment-success"
+        callback_url: "https://myhamdala-frontend.vercel.app/payment/success"
     }
 
     response = requests.post(url, json=payload, headers=headers)
