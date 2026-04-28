@@ -6,6 +6,7 @@ import uuid
 from app.models.bookings import Booking  # make sure exists
 from app.api.deps import get_db, require_admin
 from app.models.package import Package
+from app.services.payment_service import process_successful_payment
 
 router = APIRouter()
 
@@ -302,17 +303,30 @@ def mark_booking_paid(
     if not booking:
         raise HTTPException(404, "Booking not found")
 
+    # 🔒 prevent double processing
     if booking.status == "paid":
         return {
             "success": True,
             "message": "Already marked as paid"
         }
 
+    # ✅ mark paid
     booking.status = "paid"
+
+    # ✅ UPDATE PACKAGE SLOTS
+    package = db.query(Package).filter(
+        Package.id == booking.package_id
+    ).first()
+
+    if package:
+        if package.booked_slots < package.total_slots:
+            package.booked_slots += 1
+        else:
+            raise HTTPException(400, "No available slots")
 
     db.commit()
 
     return {
         "success": True,
-        "message": "Booking marked as paid"
+        "message": "Booking marked as paid and slot updated"
     }

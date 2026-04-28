@@ -186,6 +186,8 @@ def verify_payment(reference: str, db: Session = Depends(get_db)):
 # =========================
 # 🔥 WEBHOOK (FINAL CLEAN)
 # =========================
+from app.services.payment_service import process_successful_payment
+
 @router.post("/webhook")
 async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
     try:
@@ -222,26 +224,24 @@ async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
             db.commit()
             return {"status": "expired"}
 
-        if booking.status == "paid":
-            return {"status": "already processed"}
-
-        booking.status = "paid"
-
-        package = db.query(Package)\
-            .filter(Package.id == booking.package_id)\
-            .with_for_update()\
-            .first()
-
-        if package and package.booked_slots < package.total_slots:
-            package.booked_slots += 1
+        # ✅ USE SERVICE (IMPORTANT)
+        process_successful_payment(booking, db)
 
         db.commit()
 
-        send_booking_email(
-            booking.email,
-            booking.first_name,
-            package.title if package else "Package"
-        )
+        # 📧 EMAIL (after commit)
+        try:
+            package = db.query(Package).filter(
+                Package.id == booking.package_id
+            ).first()
+
+            send_booking_email(
+                booking.email,
+                booking.first_name,
+                package.title if package else "Package"
+            )
+        except Exception as e:
+            logger.warning(f"Email failed: {e}")
 
         return {"status": "success"}
 
