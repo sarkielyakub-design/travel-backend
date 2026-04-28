@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Body, status, Request
 from sqlalchemy.orm import Session
 import requests, uuid, hmac, hashlib, json, os, logging
-from datetime import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta
+
 from app.api.deps import get_current_user, get_db
 from app.models.bookings import Booking
 from app.models.package import Package
@@ -25,7 +25,6 @@ def create_and_pay(
     data: BookingCreate = Body(...),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
-    
 ):
     try:
         package = db.query(Package).filter(Package.id == package_id).first()
@@ -36,7 +35,7 @@ def create_and_pay(
         if package.booked_slots >= package.total_slots:
             raise HTTPException(400, "No available slots")
 
-        # 🔒 Prevent duplicate pending booking
+        # 🔒 Prevent duplicate pending
         existing = db.query(Booking).filter(
             Booking.user_id == user.id,
             Booking.package_id == package.id,
@@ -51,7 +50,6 @@ def create_and_pay(
                 "reference": existing.payment_reference,
             }
 
-        # 🔑 Generate unique reference
         reference = f"BOOK-{uuid.uuid4().hex}"
 
         # 📅 Validate dates
@@ -60,12 +58,10 @@ def create_and_pay(
             issue = datetime.strptime(data.passport_issue, "%Y-%m-%d").date()
             expiry = datetime.strptime(data.passport_expiry, "%Y-%m-%d").date()
         except:
-            raise HTTPException(400, "Invalid date format (YYYY-MM-DD)")
+            raise HTTPException(400, "Invalid date format")
 
-        # 💰 REAL PRICE (PRODUCTION)
         amount_kobo = int(package.price * 100)
 
-        # 🧾 Create booking
         booking = Booking(
             user_id=user.id,
             package_id=package.id,
@@ -84,7 +80,6 @@ def create_and_pay(
             payment_reference=reference,
             expires_at=datetime.utcnow() + timedelta(minutes=15)
         )
-
 
         db.add(booking)
         db.commit()
@@ -108,36 +103,32 @@ def create_and_pay(
         if not response.get("status"):
             db.delete(booking)
             db.commit()
-            raise HTTPException(400, response.get("message", "Payment init failed"))
+            raise HTTPException(400, response.get("message"))
 
         booking.payment_url = response["data"]["authorization_url"]
         db.commit()
 
         return {
-            "message": "Booking created",
             "booking_id": booking.id,
             "authorization_url": booking.payment_url,
             "reference": reference,
         }
 
-    except HTTPException:
-        raise
-
     except Exception as e:
         db.rollback()
-        logger.error(f"CREATE BOOKING ERROR: {str(e)}")
-        raise HTTPException(500, "Internal server error")
-    # =========================
-# 👤 GET USER BOOKINGS
+        logger.error(f"CREATE ERROR: {e}")
+        raise HTTPException(500, "Internal error")
+
+
+# =========================
+# 👤 USER BOOKINGS
 # =========================
 @router.get("/")
-def get_my_bookings(
-    db: Session = Depends(get_db),
-    user=Depends(get_current_user),
-):
-    return db.query(Booking).filter(
-        Booking.user_id == user.id
-    ).order_by(Booking.id.desc()).all()
+def get_my_bookings(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    return db.query(Booking)\
+        .filter(Booking.user_id == user.id)\
+        .order_by(Booking.id.desc())\
+        .all()
 
 
 # =========================
@@ -147,10 +138,7 @@ def get_my_bookings(
 def verify_payment(reference: str, db: Session = Depends(get_db)):
 
     url = f"https://api.paystack.co/transaction/verify/{reference}"
-
-    headers = {
-        "Authorization": f"Bearer {PAYSTACK_SECRET}"
-    }
+    headers = {"Authorization": f"Bearer {PAYSTACK_SECRET}"}
 
     res = requests.get(url, headers=headers).json()
 
@@ -159,67 +147,51 @@ def verify_payment(reference: str, db: Session = Depends(get_db)):
 
     data = res["data"]
 
-    if data["status"] != "success":
-        raise HTTPException(400, "Payment not successful")
-
-    booking = db.query(Booking).filter(
-        Booking.payment_reference == reference
-    ).first()
+    booking = db.query(Booking)\
+        .filter(Booking.payment_reference == reference)\
+        .first()
 
     if not booking:
         raise HTTPException(404, "Booking not found")
 
-    # 🔒 Prevent double processing
+    # ⛔ EXPIRED CHECK
+    if booking.expires_at and booking.expires_at < datetime.utcnow():
+        booking.status = "cancelled"
+        db.commit()
+        raise HTTPException(400, "Booking expired")
+
     if booking.status == "paid":
-        return {"success": True, "message": "Already processed"}
+        return {"success": True}
+
+    if data["status"] != "success":
+        raise HTTPException(400, "Payment failed")
 
     booking.status = "paid"
 
-    package = db.query(Package).filter(
-        Package.id == booking.package_id
-    ).first()
-
+    package = db.query(Package).filter(Package.id == booking.package_id).first()
     if package:
         package.booked_slots += 1
 
     db.commit()
 
-    # 📧 EMAIL (safe)
-    try:
-        send_booking_email(
-            booking.email,
-            booking.first_name,
-            package.title if package else "Package"
-        )
-    except Exception as e:
-        logger.error(f"EMAIL ERROR: {e}")
+    send_booking_email(
+        booking.email,
+        booking.first_name,
+        package.title if package else "Package"
+    )
 
     return {"success": True}
+
+
 # =========================
-# 🔥 PAYSTACK WEBHOOK
+# 🔥 WEBHOOK (FINAL CLEAN)
 # =========================
-from fastapi import APIRouter, Request, Depends, HTTPException
-from sqlalchemy.orm import Session
-import hmac, hashlib, json, os, logging
-from app.models.bookings import Booking
-from app.models.package import Package
-from app.api.deps import get_db
-from app.core.mail import send_booking_email
-
-logger = logging.getLogger(__name__)
-
-router = APIRouter()
-
-PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY")
-
-
 @router.post("/webhook")
 async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
     try:
         body = await request.body()
         signature = request.headers.get("x-paystack-signature")
 
-        # 🔐 VERIFY SIGNATURE
         computed_hash = hmac.new(
             PAYSTACK_SECRET.encode(),
             body,
@@ -227,38 +199,32 @@ async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
         ).hexdigest()
 
         if computed_hash != signature:
-            logger.warning("❌ Invalid Paystack signature")
             raise HTTPException(400, "Invalid signature")
 
         payload = json.loads(body)
 
-        # ✅ ONLY HANDLE SUCCESS EVENT
         if payload.get("event") != "charge.success":
             return {"status": "ignored"}
 
-        data = payload.get("data", {})
-        reference = data.get("reference")
+        reference = payload["data"]["reference"]
 
-        if not reference:
-            return {"status": "no reference"}
-
-        # 🔒 LOCK ROW (IMPORTANT)
         booking = db.query(Booking)\
             .filter(Booking.payment_reference == reference)\
             .with_for_update()\
             .first()
 
         if not booking:
-            logger.warning(f"❌ Booking not found: {reference}")
-            return {"status": "booking not found"}
+            return {"status": "not found"}
 
-        # 🔁 IDEMPOTENCY (VERY IMPORTANT)
+        # ⛔ EXPIRED BLOCK
+        if booking.expires_at and booking.expires_at < datetime.utcnow():
+            booking.status = "cancelled"
+            db.commit()
+            return {"status": "expired"}
+
         if booking.status == "paid":
             return {"status": "already processed"}
 
-        # =========================
-        # 💰 MARK AS PAID
-        # =========================
         booking.status = "paid"
 
         package = db.query(Package)\
@@ -266,65 +232,19 @@ async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
             .with_for_update()\
             .first()
 
-        if package:
-            # 🔒 Prevent overflow
-            if package.booked_slots < package.total_slots:
-                package.booked_slots += 1
-            else:
-                logger.error("⚠️ Overbooking prevented")
+        if package and package.booked_slots < package.total_slots:
+            package.booked_slots += 1
 
         db.commit()
 
-        # =========================
-        # 📧 EMAIL (SAFE, NON-BLOCKING)
-        # =========================
-        try:
-            send_booking_email(
-                booking.email,
-                booking.first_name,
-                package.title if package else "Package"
-            )
-        except Exception as e:
-            logger.error(f"Email error: {e}")
-
-        # =========================
-        # 📲 WHATSAPP (OPTIONAL SAFE)
-        # =========================
-        try:
-            from twilio.rest import Client
-
-            client = Client(
-                os.getenv("TWILIO_SID"),
-                os.getenv("TWILIO_AUTH_TOKEN")
-            )
-
-            message = f"""
-🕋 M.Y HAMDALA TRAVEL AND TOUR
-
-Hello {booking.first_name},
-
-✅ Your booking is CONFIRMED!
-
-📦 Package: {package.title if package else "Package"}
-💰 Amount: ₦{package.price if package else ""}
-📅 Departure: {package.departure_date if package else ""}
-
-Thank you 🙏
-"""
-
-            client.messages.create(
-                body=message,
-                from_="whatsapp:+14155238886",
-                to=f"whatsapp:{booking.phone}"
-            )
-
-        except Exception as e:
-            logger.warning(f"WhatsApp error: {e}")
-
-        logger.info(f"✅ Payment processed: {reference}")
+        send_booking_email(
+            booking.email,
+            booking.first_name,
+            package.title if package else "Package"
+        )
 
         return {"status": "success"}
 
     except Exception as e:
-        logger.error(f"🔥 WEBHOOK ERROR: {str(e)}")
+        logger.error(f"WEBHOOK ERROR: {e}")
         raise HTTPException(500, "Webhook failed")
