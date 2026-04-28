@@ -1,33 +1,33 @@
 from fastapi import APIRouter, Depends, HTTPException, Body, status, Request
 from sqlalchemy.orm import Session
-import requests, uuid, hmac, hashlib, json, asyncio, logging, os
+import requests, uuid, hmac, hashlib, json, os, logging
 from datetime import datetime
+from datetime import timedelta
 from app.api.deps import get_current_user, get_db
 from app.models.bookings import Booking
 from app.models.package import Package
 from app.schemas.bookings import BookingCreate
-from app.services.payment import initialize_payment
 from app.core.mail import send_booking_email
-from app.api.deps import require_admin
-logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Bookings"])
+logger = logging.getLogger(__name__)
+
+PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY")
+PAYSTACK_URL = "https://api.paystack.co/transaction/initialize"
 
 
 # =========================
-# 🧾 CREATE BOOKING + PAYMENT (CLEAN)
-# =========================from datetime import datetime
-import uuid
-
-@router.post("/create-and-pay", status_code=status.HTTP_201_CREATED)
+# 🧾 CREATE BOOKING + PAYMENT
+# =========================
+@router.post("/create-and-pay", status_code=201)
 def create_and_pay(
     package_id: int,
     data: BookingCreate = Body(...),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
+    
 ):
     try:
-        # 📦 GET PACKAGE
         package = db.query(Package).filter(Package.id == package_id).first()
 
         if not package:
@@ -36,7 +36,7 @@ def create_and_pay(
         if package.booked_slots >= package.total_slots:
             raise HTTPException(400, "No available slots")
 
-        # 🔁 CHECK EXISTING PENDING
+        # 🔒 Prevent duplicate pending booking
         existing = db.query(Booking).filter(
             Booking.user_id == user.id,
             Booking.package_id == package.id,
@@ -51,18 +51,21 @@ def create_and_pay(
                 "reference": existing.payment_reference,
             }
 
-        # 🔑 GENERATE REFERENCE
+        # 🔑 Generate unique reference
         reference = f"BOOK-{uuid.uuid4().hex}"
 
-        # ✅ CONVERT DATES (FIX SQLITE ERROR)
+        # 📅 Validate dates
         try:
-            date_of_birth = datetime.strptime(data.date_of_birth, "%Y-%m-%d").date()
-            passport_issue = datetime.strptime(data.passport_issue, "%Y-%m-%d").date()
-            passport_expiry = datetime.strptime(data.passport_expiry, "%Y-%m-%d").date()
-        except Exception:
-            raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD")
+            dob = datetime.strptime(data.date_of_birth, "%Y-%m-%d").date()
+            issue = datetime.strptime(data.passport_issue, "%Y-%m-%d").date()
+            expiry = datetime.strptime(data.passport_expiry, "%Y-%m-%d").date()
+        except:
+            raise HTTPException(400, "Invalid date format (YYYY-MM-DD)")
 
-        # 🧾 CREATE BOOKING
+        # 💰 REAL PRICE (PRODUCTION)
+        amount_kobo = int(package.price * 100)
+
+        # 🧾 Create booking
         booking = Booking(
             user_id=user.id,
             package_id=package.id,
@@ -74,42 +77,44 @@ def create_and_pay(
             phone=data.phone,
             passport_number=data.passport_number,
             place_of_birth=data.place_of_birth,
-            date_of_birth=date_of_birth,       # ✅ FIXED
-            passport_issue=passport_issue,     # ✅ FIXED
-            passport_expiry=passport_expiry,   # ✅ FIXED
+            date_of_birth=dob,
+            passport_issue=issue,
+            passport_expiry=expiry,
             status="pending",
-            payment_reference=reference
+            payment_reference=reference,
+            expires_at=datetime.utcnow() + timedelta(minutes=15)
         )
+
 
         db.add(booking)
         db.commit()
         db.refresh(booking)
 
         # 💳 INIT PAYSTACK
-        payment = initialize_payment(
-            email=data.email,
-            amount=500000,# kobo
-            reference=reference,
-            
-        )
+        payload = {
+            "email": booking.email,
+            "amount": amount_kobo,
+            "reference": reference,
+            "callback_url": f"{os.getenv('FRONTEND_URL')}/payment-success",
+        }
 
-        print("🔥 PAYSTACK:", payment)
+        headers = {
+            "Authorization": f"Bearer {PAYSTACK_SECRET}",
+            "Content-Type": "application/json",
+        }
 
-        # ❌ HANDLE PAYSTACK FAILURE
-        if not payment or payment.get("status") is False:
+        response = requests.post(PAYSTACK_URL, json=payload, headers=headers).json()
+
+        if not response.get("status"):
             db.delete(booking)
             db.commit()
-            raise HTTPException(
-                400,
-                payment.get("message", "Payment initialization failed")
-            )
+            raise HTTPException(400, response.get("message", "Payment init failed"))
 
-        # ✅ SAVE PAYMENT LINK
-        booking.payment_url = payment.get("authorization_url")
+        booking.payment_url = response["data"]["authorization_url"]
         db.commit()
 
         return {
-            "message": "Booking created successfully",
+            "message": "Booking created",
             "booking_id": booking.id,
             "authorization_url": booking.payment_url,
             "reference": reference,
@@ -120,9 +125,9 @@ def create_and_pay(
 
     except Exception as e:
         db.rollback()
-        print("🔥 CREATE BOOKING ERROR:", str(e))
+        logger.error(f"CREATE BOOKING ERROR: {str(e)}")
         raise HTTPException(500, "Internal server error")
-# =========================
+    # =========================
 # 👤 GET USER BOOKINGS
 # =========================
 @router.get("/")
@@ -140,7 +145,6 @@ def get_my_bookings(
 # =========================
 @router.get("/verify/{reference}")
 def verify_payment(reference: str, db: Session = Depends(get_db)):
-    PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY")
 
     url = f"https://api.paystack.co/transaction/verify/{reference}"
 
@@ -151,7 +155,7 @@ def verify_payment(reference: str, db: Session = Depends(get_db)):
     res = requests.get(url, headers=headers).json()
 
     if not res.get("status"):
-        raise HTTPException(400, "Payment verification failed")
+        raise HTTPException(400, "Verification failed")
 
     data = res["data"]
 
@@ -165,100 +169,134 @@ def verify_payment(reference: str, db: Session = Depends(get_db)):
     if not booking:
         raise HTTPException(404, "Booking not found")
 
-    if booking.status != "paid":
+    # 🔒 Prevent double processing
+    if booking.status == "paid":
+        return {"success": True, "message": "Already processed"}
+
+    booking.status = "paid"
+
+    package = db.query(Package).filter(
+        Package.id == booking.package_id
+    ).first()
+
+    if package:
+        package.booked_slots += 1
+
+    db.commit()
+
+    # 📧 EMAIL (safe)
+    try:
+        send_booking_email(
+            booking.email,
+            booking.first_name,
+            package.title if package else "Package"
+        )
+    except Exception as e:
+        logger.error(f"EMAIL ERROR: {e}")
+
+    return {"success": True}
+# =========================
+# 🔥 PAYSTACK WEBHOOK
+# =========================
+from fastapi import APIRouter, Request, Depends, HTTPException
+from sqlalchemy.orm import Session
+import hmac, hashlib, json, os, logging
+from app.models.bookings import Booking
+from app.models.package import Package
+from app.api.deps import get_db
+from app.core.mail import send_booking_email
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY")
+
+
+@router.post("/webhook")
+async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
+    try:
+        body = await request.body()
+        signature = request.headers.get("x-paystack-signature")
+
+        # 🔐 VERIFY SIGNATURE
+        computed_hash = hmac.new(
+            PAYSTACK_SECRET.encode(),
+            body,
+            hashlib.sha512
+        ).hexdigest()
+
+        if computed_hash != signature:
+            logger.warning("❌ Invalid Paystack signature")
+            raise HTTPException(400, "Invalid signature")
+
+        payload = json.loads(body)
+
+        # ✅ ONLY HANDLE SUCCESS EVENT
+        if payload.get("event") != "charge.success":
+            return {"status": "ignored"}
+
+        data = payload.get("data", {})
+        reference = data.get("reference")
+
+        if not reference:
+            return {"status": "no reference"}
+
+        # 🔒 LOCK ROW (IMPORTANT)
+        booking = db.query(Booking)\
+            .filter(Booking.payment_reference == reference)\
+            .with_for_update()\
+            .first()
+
+        if not booking:
+            logger.warning(f"❌ Booking not found: {reference}")
+            return {"status": "booking not found"}
+
+        # 🔁 IDEMPOTENCY (VERY IMPORTANT)
+        if booking.status == "paid":
+            return {"status": "already processed"}
+
+        # =========================
+        # 💰 MARK AS PAID
+        # =========================
         booking.status = "paid"
 
-        package = db.query(Package).filter(
-            Package.id == booking.package_id
-        ).first()
+        package = db.query(Package)\
+            .filter(Package.id == booking.package_id)\
+            .with_for_update()\
+            .first()
 
         if package:
-            package.booked_slots += 1
+            # 🔒 Prevent overflow
+            if package.booked_slots < package.total_slots:
+                package.booked_slots += 1
+            else:
+                logger.error("⚠️ Overbooking prevented")
 
         db.commit()
 
-        # 📧 EMAIL
-        asyncio.create_task(
+        # =========================
+        # 📧 EMAIL (SAFE, NON-BLOCKING)
+        # =========================
+        try:
             send_booking_email(
                 booking.email,
                 booking.first_name,
                 package.title if package else "Package"
             )
-        )
-
-    return {"success": True}
-
-
-# =========================
-# 🔥 PAYSTACK WEBHOOK
-# =========================
-@router.post("/webhook")
-async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
-    PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY")
-
-    body = await request.body()
-    signature = request.headers.get("x-paystack-signature")
-
-    # 🔐 VERIFY SIGNATURE
-    computed_hash = hmac.new(
-        PAYSTACK_SECRET.encode(),
-        body,
-        hashlib.sha512
-    ).hexdigest()
-
-    if computed_hash != signature:
-        raise HTTPException(400, "Invalid signature")
-
-    payload = json.loads(body)
-
-    if payload.get("event") != "charge.success":
-        return {"status": "ignored"}
-
-    data = payload["data"]
-    reference = data.get("reference")
-
-    booking = db.query(Booking).filter(
-        Booking.payment_reference == reference
-    ).first()
-
-    if not booking:
-        return {"status": "booking not found"}
-
-    if booking.status != "paid":
-        booking.status = "paid"
-
-        package = db.query(Package).filter(
-            Package.id == booking.package_id
-        ).first()
-
-        if package:
-            package.booked_slots += 1
-
-        db.commit()
-
-        # =========================
-        # 📧 EMAIL (SAFE THREAD)
-        # =========================
-        try:
-            threading.Thread(
-                target=lambda: asyncio.run(
-                    send_booking_email(
-                        booking.email,
-                        booking.first_name
-                    )
-                )
-            ).start()
         except Exception as e:
-            print("Email error:", e)
+            logger.error(f"Email error: {e}")
 
         # =========================
-        # 📲 WHATSAPP (TWILIO)
+        # 📲 WHATSAPP (OPTIONAL SAFE)
         # =========================
         try:
-            account_sid = os.getenv("TWILIO_SID")
-            auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+            from twilio.rest import Client
 
-            client = Client(account_sid, auth_token)
+            client = Client(
+                os.getenv("TWILIO_SID"),
+                os.getenv("TWILIO_AUTH_TOKEN")
+            )
 
             message = f"""
 🕋 M.Y HAMDALA TRAVEL AND TOUR
@@ -271,18 +309,22 @@ Hello {booking.first_name},
 💰 Amount: ₦{package.price if package else ""}
 📅 Departure: {package.departure_date if package else ""}
 
-We will contact you shortly.
-
 Thank you 🙏
 """
 
             client.messages.create(
                 body=message,
-                from_="whatsapp:+14155238886",  # Twilio sandbox
+                from_="whatsapp:+14155238886",
                 to=f"whatsapp:{booking.phone}"
             )
 
         except Exception as e:
-            print("WhatsApp error:", e)
+            logger.warning(f"WhatsApp error: {e}")
 
-    return {"status": "success"}
+        logger.info(f"✅ Payment processed: {reference}")
+
+        return {"status": "success"}
+
+    except Exception as e:
+        logger.error(f"🔥 WEBHOOK ERROR: {str(e)}")
+        raise HTTPException(500, "Webhook failed")

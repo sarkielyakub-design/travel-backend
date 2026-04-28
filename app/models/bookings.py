@@ -48,3 +48,6 @@ class Booking(Base):
 
     # 🕒 TIMESTAMPS
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    from sqlalchemy import DateTime
+
+expires_at = Column(DateTime, nullable=True)
