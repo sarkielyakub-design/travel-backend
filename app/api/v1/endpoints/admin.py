@@ -7,7 +7,7 @@ from app.models.bookings import Booking  # make sure exists
 from app.api.deps import get_db, require_admin
 from app.models.package import Package
 
-router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
+router = APIRouter(prefix="/admin")
 
 UPLOAD_DIR = "uploads"
 

@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 
-
 from app.api.v1.endpoints import (
     auth,
     users,
@@ -8,15 +7,10 @@ from app.api.v1.endpoints import (
     bookings,
     admin,
 )
-from fastapi import APIRouter
 
-from app.api.v1.endpoints import admin  # ✅ MUST exist
+# ✅ ONE router ONLY
+api_router = APIRouter(prefix="/api/v1")
 
-api_router = APIRouter()
-
-# ✅ THIS LINE IS THE MOST IMPORTANT
-api_router.include_router(admin.router)
-api_router = APIRouter()
 
 # 🔐 AUTH
 api_router.include_router(auth.router, prefix="/auth", tags=["Auth"])
@@ -25,10 +19,10 @@ api_router.include_router(auth.router, prefix="/auth", tags=["Auth"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
 
 # 📦 PACKAGES
-api_router.include_router(packages.router,) 
+api_router.include_router(packages.router, prefix="/packages", tags=["Packages"])
 
-# 📘 BOOKINGS ✅
+# 📘 BOOKINGS
 api_router.include_router(bookings.router, prefix="/bookings", tags=["Bookings"])
 
-# 🛠️ ADMIN# api.py
-api_router.include_router(admin.router)
+# 🛠️ ADMIN
+api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
