@@ -6,7 +6,7 @@ from app.models.package import Package
 
 router = APIRouter()
 
-@router.get("packages")
+@router.get("")
 def get_packages(db: Session = Depends(get_db)):
     packages = db.query(Package).all()
 
