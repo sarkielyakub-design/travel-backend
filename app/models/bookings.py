@@ -26,13 +26,13 @@ class Booking(Base):
     passport_number = Column(String, nullable=False)
     place_of_birth = Column(String, nullable=False)
 
-    # ✅ FIXED: USE REAL DATE TYPES
+    # 📅 DATE FIELDS
     date_of_birth = Column(Date, nullable=False)
     passport_issue = Column(Date, nullable=False)
     passport_expiry = Column(Date, nullable=False)
 
     # 💰 PAYMENT STATUS
-    status = Column(String, default="pending", index=True)  # pending / paid / failed / expired
+    status = Column(String, default="pending", index=True)
 
     # 🔥 PAYMENT DATA
     payment_reference = Column(
@@ -43,11 +43,10 @@ class Booking(Base):
         default=lambda: f"BOOK-{uuid.uuid4().hex}"
     )
 
-    # ✅ FIXED: ADD THIS (YOUR 500 ERROR CAUSE)
     payment_url = Column(String, nullable=True)
+
+    # ✅ NEW: EXPIRATION (FIXED PROPERLY)
+    expires_at = Column(DateTime, nullable=True, index=True)
 
     # 🕒 TIMESTAMPS
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    from sqlalchemy import DateTime
-
-expires_at = Column(DateTime, nullable=True)
