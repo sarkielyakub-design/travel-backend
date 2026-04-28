@@ -4,9 +4,9 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db
 from app.models.package import Package
 
-router = APIRouter(prefix="/packages", tags=["Public"])
+router = APIRouter()
 
-@router.get("")
+@router.get("packages")
 def get_packages(db: Session = Depends(get_db)):
     packages = db.query(Package).all()
 
