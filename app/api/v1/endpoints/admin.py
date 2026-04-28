@@ -7,7 +7,7 @@ from app.models.bookings import Booking  # make sure exists
 from app.api.deps import get_db, require_admin
 from app.models.package import Package
 
-router = APIRouter(prefix="/admin", tags=["Admin"])
+router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
 
 UPLOAD_DIR = "uploads"
 
@@ -235,8 +235,12 @@ async def upload_image(
         "image_url": package.image_url
     }
 @router.get("/bookings")
-def get_admin_bookings(db: Session = Depends(get_db)):
+def get_admin_bookings(
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),  # 🔐 ADD THIS
+):
     bookings = db.query(Booking).all()
+
 
     return {
         "success": True,
@@ -245,7 +249,7 @@ def get_admin_bookings(db: Session = Depends(get_db)):
     }
 from sqlalchemy import func
 
-from sqlalchemy import func
+
 
 # =========================
 # 📊 ADMIN ANALYTICS
