@@ -194,6 +194,10 @@ async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
         body = await request.body()
         signature = request.headers.get("x-paystack-signature")
 
+        if not signature:
+            raise HTTPException(400, "Missing signature")
+
+        # 🔐 VERIFY SIGNATURE
         computed_hash = hmac.new(
             PAYSTACK_SECRET.encode(),
             body,
@@ -205,46 +209,74 @@ async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
 
         payload = json.loads(body)
 
+        # ✅ ONLY HANDLE SUCCESS
         if payload.get("event") != "charge.success":
             return {"status": "ignored"}
 
-        reference = payload["data"]["reference"]
+        data = payload.get("data", {})
+        reference = data.get("reference")
 
-        booking = db.query(Booking)\
-            .filter(Booking.payment_reference == reference)\
-            .with_for_update()\
+        if not reference:
+            return {"status": "no reference"}
+
+        # 🔒 LOCK BOOKING
+        booking = (
+            db.query(Booking)
+            .filter(Booking.payment_reference == reference)
+            .with_for_update()
             .first()
+        )
 
         if not booking:
-            return {"status": "not found"}
+            return {"status": "booking not found"}
 
-        # ⛔ EXPIRED BLOCK
+        # ⛔ EXPIRED CHECK
         if booking.expires_at and booking.expires_at < datetime.utcnow():
             booking.status = "cancelled"
             db.commit()
             return {"status": "expired"}
 
-        # ✅ USE SERVICE (IMPORTANT)
-        process_successful_payment(booking, db)
+        # 🔁 IDEMPOTENCY (VERY IMPORTANT)
+        if booking.status == "paid":
+            return {"status": "already processed"}
+
+        # 🔒 LOCK PACKAGE
+        package = (
+            db.query(Package)
+            .filter(Package.id == booking.package_id)
+            .with_for_update()
+            .first()
+        )
+
+        if not package:
+            return {"status": "package not found"}
+
+        # 🚫 PREVENT OVERBOOKING
+        if package.booked_slots >= package.total_slots:
+            booking.status = "failed"
+            db.commit()
+            return {"status": "no slots"}
+
+        # ✅ UPDATE STATE
+        booking.status = "paid"
+        package.booked_slots += 1
 
         db.commit()
 
-        # 📧 EMAIL (after commit)
+        # 📧 EMAIL (NON-CRITICAL)
         try:
-            package = db.query(Package).filter(
-                Package.id == booking.package_id
-            ).first()
-
             send_booking_email(
                 booking.email,
                 booking.first_name,
-                package.title if package else "Package"
+                package.title
             )
         except Exception as e:
             logger.warning(f"Email failed: {e}")
 
+        logger.info(f"✅ Payment success processed: {reference}")
+
         return {"status": "success"}
 
     except Exception as e:
-        logger.error(f"WEBHOOK ERROR: {e}")
+        logger.error(f"🔥 WEBHOOK ERROR: {str(e)}")
         raise HTTPException(500, "Webhook failed")
