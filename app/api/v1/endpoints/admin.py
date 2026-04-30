@@ -316,3 +316,18 @@ def mark_booking_paid(
         "success": True,
         "message": "Booking marked as paid and slot updated"
     }
+@router.get("/admin/stats")
+def get_admin_stats(db: Session = Depends(get_db)):
+
+    total = db.query(Booking).count()
+    paid = db.query(Booking).filter(Booking.status == "paid").count()
+    pending = db.query(Booking).filter(Booking.status == "pending").count()
+
+    conversion_rate = (paid / total * 100) if total > 0 else 0
+
+    return {
+        "total_bookings": total,
+        "paid": paid,
+        "pending": pending,
+        "conversion_rate": round(conversion_rate, 2),
+    }
