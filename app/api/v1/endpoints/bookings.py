@@ -35,20 +35,24 @@ def create_and_pay(
         if package.booked_slots >= package.total_slots:
             raise HTTPException(400, "No available slots")
 
-        # 🔒 Prevent duplicate pending
+        # 🔒 Prevent duplicate pending (FIXED)
         existing = db.query(Booking).filter(
             Booking.user_id == user.id,
             Booking.package_id == package.id,
             Booking.status == "pending"
         ).first()
 
-        if existing and existing.payment_url:
-            return {
-                "message": "Pending booking already exists",
-                "booking_id": existing.id,
-                "authorization_url": existing.payment_url,
-                "reference": existing.payment_reference,
-            }
+        if existing:
+            if existing.expires_at and existing.expires_at < datetime.utcnow():
+                existing.status = "cancelled"
+                db.commit()
+            else:
+                return {
+                    "message": "Pending booking already exists",
+                    "booking_id": existing.id,
+                    "authorization_url": existing.payment_url,
+                    "reference": existing.payment_reference,
+                }
 
         reference = f"BOOK-{uuid.uuid4().hex}"
 
@@ -118,7 +122,6 @@ def create_and_pay(
         db.rollback()
         logger.error(f"CREATE ERROR: {e}")
         raise HTTPException(500, "Internal error")
-
 
 # =========================
 # 👤 USER BOOKINGS
