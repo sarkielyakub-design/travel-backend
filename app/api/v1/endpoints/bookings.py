@@ -166,22 +166,16 @@ def verify_payment(reference: str, db: Session = Depends(get_db)):
     if data["status"] != "success":
         raise HTTPException(400, "Payment failed")
 
-    booking.status = "paid"
-
-    package = db.query(Package).filter(Package.id == booking.package_id).first()
-    if package:
-        package.booked_slots += 1
-
-    db.commit()
+    # ✅ USE SAFE FUNCTION
+    process_successful_payment(booking, db)
 
     send_booking_email(
         booking.email,
         booking.first_name,
-        package.title if package else "Package"
+        booking.package.title if booking.package else "Package"
     )
 
     return {"success": True}
-
 
 # =========================
 # 🔥 WEBHOOK (FINAL CLEAN)

@@ -35,4 +35,11 @@ def process_successful_payment(booking: Booking, db: Session):
     booking.status = "paid"
     package.booked_slots += 1
 
+    # 💾 SAVE CHANGES
+    db.commit()
+
+    # 🔄 Refresh objects
+    db.refresh(booking)
+    db.refresh(package)
+
     return booking

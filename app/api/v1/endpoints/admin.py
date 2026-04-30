@@ -303,28 +303,14 @@ def mark_booking_paid(
     if not booking:
         raise HTTPException(404, "Booking not found")
 
-    # 🔒 prevent double processing
     if booking.status == "paid":
         return {
             "success": True,
             "message": "Already marked as paid"
         }
 
-    # ✅ mark paid
-    booking.status = "paid"
-
-    # ✅ UPDATE PACKAGE SLOTS
-    package = db.query(Package).filter(
-        Package.id == booking.package_id
-    ).first()
-
-    if package:
-        if package.booked_slots < package.total_slots:
-            package.booked_slots += 1
-        else:
-            raise HTTPException(400, "No available slots")
-
-    db.commit()
+    # ✅ USE CENTRAL LOGIC
+    process_successful_payment(booking, db)
 
     return {
         "success": True,
