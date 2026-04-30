@@ -39,3 +39,6 @@ class Package(Base):
     # 🔥 IMPORTANT (ADD THIS)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    public_id = Column(String, nullable=True)
+    

@@ -7,7 +7,8 @@ from app.models.bookings import Booking  # make sure exists
 from app.api.deps import get_db, require_admin
 from app.models.package import Package
 from app.services.payment_service import process_successful_payment
-
+import cloudinary.uploader
+from app.utils.cloudinary import cloudinary  # make sure this exists
 router = APIRouter()
 
 UPLOAD_DIR = "uploads"
@@ -41,20 +42,23 @@ async def create_package(
     file: UploadFile = File(None),
 
     db: Session = Depends(get_db),
-    admin=Depends(require_admin),  # 🔐 protect route
+    admin=Depends(require_admin),
 ):
     image_url = None
 
-    # 📸 HANDLE IMAGE
+    # 📸 CLOUDINARY UPLOAD (FIXED)
     if file:
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-        filename = f"{uuid.uuid4()}_{file.filename}"
-        path = os.path.join(UPLOAD_DIR, filename)
+        try:
+            result = cloudinary.uploader.upload(
+                file.file,
+                folder="packages",  # optional (good practice)
+                resource_type="image"
+            )
 
-        with open(path, "wb") as f:
-            f.write(await file.read())
+            image_url = result.get("secure_url")
 
-        image_url = f"/{UPLOAD_DIR}/{filename}"
+        except Exception as e:
+            raise HTTPException(500, f"Image upload failed: {str(e)}")
 
     # 🧱 CREATE PACKAGE
     new_package = Package(
@@ -91,7 +95,6 @@ async def create_package(
         "data": new_package
     }
 
-
 # =========================
 # 👑 GET ALL (ADMIN)
 # =========================
@@ -113,7 +116,7 @@ def get_admin_packages(
 # 👑 UPDATE PACKAGE
 # =========================
 @router.put("/packages/{package_id}")
-def update_package(
+async def update_package(
     package_id: int,
 
     title: str = Form(...),
@@ -135,6 +138,8 @@ def update_package(
     duration_days: int = Form(0),
     total_slots: int = Form(0),
 
+    file: UploadFile = File(None),  # 🔥 NEW
+
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
@@ -143,7 +148,7 @@ def update_package(
     if not package:
         raise HTTPException(status_code=404, detail="Package not found")
 
-    # ✏️ UPDATE FIELDS
+    # ✏️ UPDATE BASIC FIELDS
     package.title = title
     package.description = description
     package.price = price
@@ -163,6 +168,30 @@ def update_package(
     package.duration_days = duration_days
     package.total_slots = total_slots
 
+    # 📸 HANDLE IMAGE UPDATE
+    if file:
+        try:
+            # 🔥 DELETE OLD IMAGE (VERY IMPORTANT)
+            if package.public_id:
+                cloudinary.uploader.destroy(package.public_id)
+
+            # 🔥 UPLOAD NEW IMAGE
+            result = cloudinary.uploader.upload(
+                file.file,
+                folder="packages",
+                transformation=[
+                    {"width": 800, "height": 600, "crop": "fill"},
+                    {"quality": "auto"},
+                    {"fetch_format": "auto"}
+                ]
+            )
+
+            package.image_url = result.get("secure_url")
+            package.public_id = result.get("public_id")
+
+        except Exception as e:
+            raise HTTPException(500, f"Image update failed: {str(e)}")
+
     db.commit()
     db.refresh(package)
 
@@ -171,11 +200,11 @@ def update_package(
         "message": "Package updated",
         "data": package
     }
-
-
 # =========================
 # 👑 DELETE PACKAGE
 # =========================
+import cloudinary.uploader
+
 @router.delete("/packages/{package_id}")
 def delete_package(
     package_id: int,
@@ -187,11 +216,12 @@ def delete_package(
     if not package:
         raise HTTPException(status_code=404, detail="Package not found")
 
-    # 🧹 DELETE IMAGE
-    if package.image_url:
-        path = package.image_url.lstrip("/")
-        if os.path.exists(path):
-            os.remove(path)
+    # 🔥 DELETE IMAGE FROM CLOUDINARY
+    try:
+        if package.public_id:
+            cloudinary.uploader.destroy(package.public_id)
+    except Exception as e:
+        print(f"Cloudinary delete failed: {e}")  # don't break deletion
 
     db.delete(package)
     db.commit()
@@ -200,7 +230,6 @@ def delete_package(
         "success": True,
         "message": "Package deleted"
     }
-
 
 # =========================
 # 📸 UPLOAD IMAGE ONLY
