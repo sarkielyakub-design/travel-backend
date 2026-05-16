@@ -1,14 +1,39 @@
-from fastapi import APIRouter, Form, File, UploadFile, Depends, HTTPException
+# =========================
+# 🔥 IMPORTS
+# =========================
+
+from fastapi import (
+    APIRouter,
+    Form,
+    File,
+    UploadFile,
+    Depends,
+    HTTPException,
+)
+
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import Optional
+
 import os
 import uuid
-from app.models.bookings import Booking  # make sure exists
-from app.api.deps import get_db, require_admin
-from app.models.package import Package
-from app.services.payment_service import process_successful_payment
+
 import cloudinary.uploader
-from app.utils.cloudinary import cloudinary  # make sure this exists
+
+from app.api.deps import (
+    get_db,
+    require_admin,
+)
+
+from app.models.package import Package
+from app.models.bookings import Booking
+from app.models.user import User
+from app.models.payment import Payment
+
+from app.services.payment_service import (
+    process_successful_payment,
+)
+
 router = APIRouter()
 
 UPLOAD_DIR = "uploads"
@@ -44,23 +69,31 @@ async def create_package(
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
-    image_url = None
 
-    # 📸 CLOUDINARY UPLOAD (FIXED)
+    image_url = None
+    public_id = None
+
+    # 🔥 CLOUDINARY UPLOAD
     if file:
+
         try:
+
             result = cloudinary.uploader.upload(
                 file.file,
-                folder="packages",  # optional (good practice)
-                resource_type="image"
+                folder="packages",
+                resource_type="image",
             )
 
             image_url = result.get("secure_url")
+            public_id = result.get("public_id")
 
         except Exception as e:
-            raise HTTPException(500, f"Image upload failed: {str(e)}")
+            raise HTTPException(
+                500,
+                f"Image upload failed: {str(e)}"
+            )
 
-    # 🧱 CREATE PACKAGE
+    # 🔥 CREATE PACKAGE
     new_package = Package(
         title=title,
         description=description,
@@ -82,7 +115,8 @@ async def create_package(
         total_slots=total_slots,
         booked_slots=booked_slots,
 
-        image_url=image_url
+        image_url=image_url,
+        public_id=public_id,
     )
 
     db.add(new_package)
@@ -91,24 +125,26 @@ async def create_package(
 
     return {
         "success": True,
-        "message": "Package created",
-        "data": new_package
+        "message": "Package created successfully",
+        "data": new_package,
     }
 
+
 # =========================
-# 👑 GET ALL (ADMIN)
+# 👑 GET PACKAGES
 # =========================
 @router.get("/packages")
 def get_admin_packages(
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
+
     packages = db.query(Package).all()
 
     return {
         "success": True,
         "total": len(packages),
-        "data": packages
+        "data": packages,
     }
 
 
@@ -138,17 +174,23 @@ async def update_package(
     duration_days: int = Form(0),
     total_slots: int = Form(0),
 
-    file: UploadFile = File(None),  # 🔥 NEW
+    file: UploadFile = File(None),
 
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
-    package = db.query(Package).filter(Package.id == package_id).first()
+
+    package = db.query(Package).filter(
+        Package.id == package_id
+    ).first()
 
     if not package:
-        raise HTTPException(status_code=404, detail="Package not found")
+        raise HTTPException(
+            404,
+            "Package not found"
+        )
 
-    # ✏️ UPDATE BASIC FIELDS
+    # 🔥 UPDATE DATA
     package.title = title
     package.description = description
     package.price = price
@@ -168,29 +210,34 @@ async def update_package(
     package.duration_days = duration_days
     package.total_slots = total_slots
 
-    # 📸 HANDLE IMAGE UPDATE
+    # 🔥 UPDATE IMAGE
     if file:
-        try:
-            # 🔥 DELETE OLD IMAGE (VERY IMPORTANT)
-            if package.public_id:
-                cloudinary.uploader.destroy(package.public_id)
 
-            # 🔥 UPLOAD NEW IMAGE
+        try:
+
+            if package.public_id:
+                cloudinary.uploader.destroy(
+                    package.public_id
+                )
+
             result = cloudinary.uploader.upload(
                 file.file,
                 folder="packages",
-                transformation=[
-                    {"width": 800, "height": 600, "crop": "fill"},
-                    {"quality": "auto"},
-                    {"fetch_format": "auto"}
-                ]
             )
 
-            package.image_url = result.get("secure_url")
-            package.public_id = result.get("public_id")
+            package.image_url = result.get(
+                "secure_url"
+            )
+
+            package.public_id = result.get(
+                "public_id"
+            )
 
         except Exception as e:
-            raise HTTPException(500, f"Image update failed: {str(e)}")
+            raise HTTPException(
+                500,
+                f"Image update failed: {str(e)}"
+            )
 
     db.commit()
     db.refresh(package)
@@ -198,87 +245,114 @@ async def update_package(
     return {
         "success": True,
         "message": "Package updated",
-        "data": package
+        "data": package,
     }
+
+
 # =========================
 # 👑 DELETE PACKAGE
 # =========================
-import cloudinary.uploader
-
 @router.delete("/packages/{package_id}")
 def delete_package(
     package_id: int,
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
-    package = db.query(Package).filter(Package.id == package_id).first()
+
+    package = db.query(Package).filter(
+        Package.id == package_id
+    ).first()
 
     if not package:
-        raise HTTPException(status_code=404, detail="Package not found")
+        raise HTTPException(
+            404,
+            "Package not found"
+        )
 
-    # 🔥 DELETE IMAGE FROM CLOUDINARY
+    # 🔥 DELETE IMAGE
     try:
+
         if package.public_id:
-            cloudinary.uploader.destroy(package.public_id)
+            cloudinary.uploader.destroy(
+                package.public_id
+            )
+
     except Exception as e:
-        print(f"Cloudinary delete failed: {e}")  # don't break deletion
+        print(e)
 
     db.delete(package)
     db.commit()
 
     return {
         "success": True,
-        "message": "Package deleted"
+        "message": "Package deleted",
     }
 
+
 # =========================
-# 📸 UPLOAD IMAGE ONLY
+# 📘 GET BOOKINGS
 # =========================
-@router.post("/packages/{package_id}/upload")
-async def upload_image(
-    package_id: int,
-    file: UploadFile = File(...),
-
-    db: Session = Depends(get_db),
-    admin=Depends(require_admin),
-):
-    package = db.query(Package).filter(Package.id == package_id).first()
-
-    if not package:
-        raise HTTPException(status_code=404, detail="Package not found")
-
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-    filename = f"{uuid.uuid4()}_{file.filename}"
-    path = os.path.join(UPLOAD_DIR, filename)
-
-    with open(path, "wb") as f:
-        f.write(await file.read())
-
-    package.image_url = f"/{UPLOAD_DIR}/{filename}"
-
-    db.commit()
-    db.refresh(package)
-
-    return {
-        "success": True,
-        "image_url": package.image_url
-    }
 @router.get("/bookings")
 def get_admin_bookings(
     db: Session = Depends(get_db),
-    admin=Depends(require_admin),  # 🔐 ADD THIS
+    admin=Depends(require_admin),
 ):
-    bookings = db.query(Booking).all()
 
+    bookings = (
+        db.query(Booking)
+        .order_by(Booking.id.desc())
+        .all()
+    )
 
     return {
         "success": True,
         "total": len(bookings),
-        "data": bookings
+        "data": bookings,
     }
-from sqlalchemy import func
 
+
+# =========================
+# 👥 GET USERS
+# =========================
+@router.get("/users")
+def get_admin_users(
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+
+    users = (
+        db.query(User)
+        .order_by(User.id.desc())
+        .all()
+    )
+
+    return {
+        "success": True,
+        "total": len(users),
+        "data": users,
+    }
+
+
+# =========================
+# 💳 GET PAYMENTS
+# =========================
+@router.get("/payments")
+def get_admin_payments(
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+
+    payments = (
+        db.query(Payment)
+        .order_by(Payment.id.desc())
+        .all()
+    )
+
+    return {
+        "success": True,
+        "total": len(payments),
+        "data": payments,
+    }
 
 
 # =========================
@@ -289,22 +363,60 @@ def get_admin_analytics(
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
-    total_bookings = db.query(func.count(Booking.id)).scalar() or 0
 
-    paid = db.query(func.count(Booking.id)).filter(
-        Booking.status == "paid"
-    ).scalar() or 0
+    total_bookings = (
+        db.query(func.count(Booking.id))
+        .scalar()
+    ) or 0
 
-    pending = db.query(func.count(Booking.id)).filter(
-        Booking.status == "pending"
-    ).scalar() or 0
+    paid = (
+        db.query(func.count(Booking.id))
+        .filter(
+            Booking.status == "paid"
+        )
+        .scalar()
+    ) or 0
 
-    total_revenue = db.query(func.sum(Package.price))\
-        .join(Booking, Booking.package_id == Package.id)\
-        .filter(Booking.status == "paid")\
-        .scalar() or 0
+    pending = (
+        db.query(func.count(Booking.id))
+        .filter(
+            Booking.status == "pending"
+        )
+        .scalar()
+    ) or 0
 
-    conversion_rate = (paid / total_bookings * 100) if total_bookings else 0
+    total_users = (
+        db.query(func.count(User.id))
+        .scalar()
+    ) or 0
+
+    total_packages = (
+        db.query(func.count(Package.id))
+        .scalar()
+    ) or 0
+
+    total_payments = (
+        db.query(func.count(Payment.id))
+        .scalar()
+    ) or 0
+
+    total_revenue = (
+        db.query(func.sum(Payment.amount))
+        .scalar()
+    ) or 0
+
+    conversion_rate = (
+        (paid / total_bookings) * 100
+        if total_bookings > 0
+        else 0
+    )
+
+    latest_bookings = (
+        db.query(Booking)
+        .order_by(Booking.id.desc())
+        .limit(5)
+        .all()
+    )
 
     return {
         "success": True,
@@ -312,12 +424,24 @@ def get_admin_analytics(
             "total_bookings": total_bookings,
             "paid": paid,
             "pending": pending,
-            "total_revenue": total_revenue,
-            "conversion_rate": round(conversion_rate, 2),
+            "conversion_rate": round(
+                conversion_rate,
+                2
+            ),
+
+            "total_users": total_users,
+            "total_packages": total_packages,
+            "total_payments": total_payments,
+
+            "revenue": total_revenue,
+
+            "recent_activity": latest_bookings,
         }
     }
+
+
 # =========================
-# 💰 MARK BOOKING AS PAID
+# 💰 MARK BOOKING PAID
 # =========================
 @router.put("/bookings/{booking_id}/pay")
 def mark_booking_paid(
@@ -325,38 +449,94 @@ def mark_booking_paid(
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
+
     booking = db.query(Booking).filter(
         Booking.id == booking_id
     ).first()
 
     if not booking:
-        raise HTTPException(404, "Booking not found")
+        raise HTTPException(
+            404,
+            "Booking not found"
+        )
 
     if booking.status == "paid":
         return {
             "success": True,
-            "message": "Already marked as paid"
+            "message": "Already paid",
         }
 
-    # ✅ USE CENTRAL LOGIC
-    process_successful_payment(booking, db)
+    # 🔥 PROCESS PAYMENT
+    process_successful_payment(
+        booking,
+        db
+    )
 
     return {
         "success": True,
-        "message": "Booking marked as paid and slot updated"
+        "message": "Booking marked as paid",
     }
-@router.get("/admin/stats")
-def get_admin_stats(db: Session = Depends(get_db)):
 
-    total = db.query(Booking).count()
-    paid = db.query(Booking).filter(Booking.status == "paid").count()
-    pending = db.query(Booking).filter(Booking.status == "pending").count()
 
-    conversion_rate = (paid / total * 100) if total > 0 else 0
+# =========================
+# 📈 LIVE STATS
+# =========================
+@router.get("/stats")
+def get_admin_stats(
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+
+    total_bookings = (
+        db.query(Booking).count()
+    )
+
+    paid = (
+        db.query(Booking)
+        .filter(
+            Booking.status == "paid"
+        )
+        .count()
+    )
+
+    pending = (
+        db.query(Booking)
+        .filter(
+            Booking.status == "pending"
+        )
+        .count()
+    )
+
+    total_users = (
+        db.query(User).count()
+    )
+
+    total_packages = (
+        db.query(Package).count()
+    )
+
+    total_payments = (
+        db.query(Payment).count()
+    )
+
+    conversion_rate = (
+        (paid / total_bookings) * 100
+        if total_bookings > 0
+        else 0
+    )
 
     return {
-        "total_bookings": total,
-        "paid": paid,
-        "pending": pending,
-        "conversion_rate": round(conversion_rate, 2),
+        "success": True,
+        "data": {
+            "total_bookings": total_bookings,
+            "paid": paid,
+            "pending": pending,
+            "total_users": total_users,
+            "total_packages": total_packages,
+            "total_payments": total_payments,
+            "conversion_rate": round(
+                conversion_rate,
+                2
+            ),
+        }
     }
