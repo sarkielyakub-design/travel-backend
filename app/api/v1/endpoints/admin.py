@@ -28,7 +28,7 @@ from app.api.deps import (
 from app.models.package import Package
 from app.models.bookings import Booking
 from app.models.user import User
-from app.models.payment import Payment
+
 
 from app.services.payment_service import (
     process_successful_payment,
@@ -336,25 +336,10 @@ def get_admin_users(
 # =========================
 # 💳 GET PAYMENTS
 # =========================
-@router.get("/payments")
-def get_admin_payments(
-    db: Session = Depends(get_db),
-    admin=Depends(require_admin),
-):
 
-    payments = (
-        db.query(Payment)
-        .order_by(Payment.id.desc())
-        .all()
-    )
-
-    return {
-        "success": True,
-        "total": len(payments),
-        "data": payments,
-    }
-
-
+# =========================
+# 📊 ADMIN ANALYTICS
+# =========================
 # =========================
 # 📊 ADMIN ANALYTICS
 # =========================
@@ -364,53 +349,51 @@ def get_admin_analytics(
     admin=Depends(require_admin),
 ):
 
-    total_bookings = (
-        db.query(func.count(Booking.id))
-        .scalar()
-    ) or 0
+    # BOOKINGS
+    total_bookings = db.query(func.count(Booking.id)).scalar() or 0
 
     paid = (
         db.query(func.count(Booking.id))
+        .filter(Booking.status == "paid")
+        .scalar()
+    ) or 0
+
+    pending = (
+        db.query(func.count(Booking.id))
+        .filter(Booking.status != "paid")
+        .scalar()
+    ) or 0
+
+    # USERS
+    total_users = db.query(func.count(User.id)).scalar() or 0
+
+    # PACKAGES
+    total_packages = db.query(func.count(Package.id)).scalar() or 0
+
+    # PAYMENTS (Paid bookings)
+    total_payments = paid
+
+    # REVENUE
+    total_revenue = (
+        db.query(func.sum(Package.price))
+        .join(
+            Booking,
+            Booking.package_id == Package.id
+        )
         .filter(
             Booking.status == "paid"
         )
         .scalar()
     ) or 0
 
-    pending = (
-        db.query(func.count(Booking.id))
-        .filter(
-            Booking.status == "pending"
-        )
-        .scalar()
-    ) or 0
-
-    total_users = (
-        db.query(func.count(User.id))
-        .scalar()
-    ) or 0
-
-    total_packages = (
-        db.query(func.count(Package.id))
-        .scalar()
-    ) or 0
-
-    total_payments = (
-        db.query(func.count(Payment.id))
-        .scalar()
-    ) or 0
-
-    total_revenue = (
-        db.query(func.sum(Payment.amount))
-        .scalar()
-    ) or 0
-
+    # CONVERSION
     conversion_rate = (
-        (paid / total_bookings) * 100
+        round((paid / total_bookings) * 100, 2)
         if total_bookings > 0
         else 0
     )
 
+    # RECENT BOOKINGS
     latest_bookings = (
         db.query(Booking)
         .order_by(Booking.id.desc())
@@ -424,19 +407,13 @@ def get_admin_analytics(
             "total_bookings": total_bookings,
             "paid": paid,
             "pending": pending,
-            "conversion_rate": round(
-                conversion_rate,
-                2
-            ),
-
             "total_users": total_users,
             "total_packages": total_packages,
             "total_payments": total_payments,
-
-            "revenue": total_revenue,
-
+            "revenue": float(total_revenue),
+            "conversion_rate": conversion_rate,
             "recent_activity": latest_bookings,
-        }
+        },
     }
 
 
@@ -487,40 +464,28 @@ def get_admin_stats(
     admin=Depends(require_admin),
 ):
 
-    total_bookings = (
-        db.query(Booking).count()
-    )
+    total_bookings = db.query(Booking).count()
 
     paid = (
         db.query(Booking)
-        .filter(
-            Booking.status == "paid"
-        )
+        .filter(Booking.status == "paid")
         .count()
     )
 
     pending = (
         db.query(Booking)
-        .filter(
-            Booking.status == "pending"
-        )
+        .filter(Booking.status != "paid")
         .count()
     )
 
-    total_users = (
-        db.query(User).count()
-    )
+    total_users = db.query(User).count()
 
-    total_packages = (
-        db.query(Package).count()
-    )
+    total_packages = db.query(Package).count()
 
-    total_payments = (
-        db.query(Payment).count()
-    )
+    total_payments = paid
 
     conversion_rate = (
-        (paid / total_bookings) * 100
+        round((paid / total_bookings) * 100, 2)
         if total_bookings > 0
         else 0
     )
@@ -534,9 +499,6 @@ def get_admin_stats(
             "total_users": total_users,
             "total_packages": total_packages,
             "total_payments": total_payments,
-            "conversion_rate": round(
-                conversion_rate,
-                2
-            ),
-        }
+            "conversion_rate": conversion_rate,
+        },
     }

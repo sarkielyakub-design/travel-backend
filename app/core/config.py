@@ -1,24 +1,45 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import EmailStr, SecretStr
 
 
 class Settings(BaseSettings):
-    # 💰 PAYMENTS
-    PAYSTACK_SECRET_KEY: str
+    # ==========================
+    # DATABASE
+    # ==========================
+    DATABASE_URL: str
 
-    # 📧 EMAIL (MATCH fastapi-mail)
+    # ==========================
+    # FRONTEND
+    # ==========================
+    FRONTEND_URL: str
+
+    # ==========================
+    # PAYSTACK
+    # ==========================
+    PAYSTACK_SECRET_KEY: SecretStr
+
+    # ==========================
+    # EMAIL
+    # ==========================
     MAIL_USERNAME: str
-    MAIL_PASSWORD: str
-    MAIL_FROM: str
+    MAIL_PASSWORD: SecretStr
+    MAIL_FROM: EmailStr
     MAIL_SERVER: str
     MAIL_PORT: int = 587
     MAIL_STARTTLS: bool = True
     MAIL_SSL_TLS: bool = False
     USE_CREDENTIALS: bool = True
 
-    # ⚙️ CONFIG
+    # Optional
+    MAIL_FROM_NAME: str = "M.Y Hamdala Travel & Tours"
+
+    # ==========================
+    # PYDANTIC CONFIG
+    # ==========================
     model_config = SettingsConfigDict(
         env_file=".env",
-        extra="ignore"
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
 
 
