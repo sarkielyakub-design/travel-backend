@@ -9,6 +9,7 @@ from app.api.v1.api import api_router
 from app.db.base import Base
 from app.db.session import engine
 from app.core.init_db import init_admin
+import app.core.cloudinary
 
 
 # =========================
