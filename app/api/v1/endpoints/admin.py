@@ -42,6 +42,9 @@ UPLOAD_DIR = "uploads"
 # =========================
 # 👑 CREATE PACKAGE
 # =========================
+import traceback
+from fastapi import HTTPException
+
 @router.post("/packages")
 async def create_package(
     title: str = Form(...),
@@ -69,67 +72,55 @@ async def create_package(
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
+    try:
+        image_url = None
+        public_id = None
 
-    image_url = None
-    public_id = None
-
-    # 🔥 CLOUDINARY UPLOAD
-    if file:
-
-        try:
-
+        if file:
+            print("Uploading image to Cloudinary...")
             result = cloudinary.uploader.upload(
                 file.file,
                 folder="packages",
                 resource_type="image",
             )
+            print(result)
 
             image_url = result.get("secure_url")
             public_id = result.get("public_id")
 
-        except Exception as e:
-            raise HTTPException(
-                500,
-                f"Image upload failed: {str(e)}"
-            )
+        new_package = Package(
+            title=title,
+            description=description,
+            price=price,
+            flight_name=flight_name,
+            flight_from=flight_from,
+            flight_to=flight_to,
+            departure_date=departure_date,
+            return_date=return_date,
+            hotel_name=hotel_name,
+            hotel_rating=hotel_rating,
+            category=category,
+            duration_days=duration_days,
+            total_slots=total_slots,
+            booked_slots=booked_slots,
+            image_url=image_url,
+            public_id=public_id,
+        )
 
-    # 🔥 CREATE PACKAGE
-    new_package = Package(
-        title=title,
-        description=description,
-        price=price,
+        db.add(new_package)
+        db.commit()
+        db.refresh(new_package)
 
-        flight_name=flight_name,
-        flight_from=flight_from,
-        flight_to=flight_to,
+        return {
+            "success": True,
+            "message": "Package created successfully",
+            "data": new_package,
+        }
 
-        departure_date=departure_date,
-        return_date=return_date,
-
-        hotel_name=hotel_name,
-        hotel_rating=hotel_rating,
-
-        category=category,
-
-        duration_days=duration_days,
-        total_slots=total_slots,
-        booked_slots=booked_slots,
-
-        image_url=image_url,
-        public_id=public_id,
-    )
-
-    db.add(new_package)
-    db.commit()
-    db.refresh(new_package)
-
-    return {
-        "success": True,
-        "message": "Package created successfully",
-        "data": new_package,
-    }
-
-
+    except Exception as e:
+        traceback.print_exc()
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 # =========================
 # 👑 GET PACKAGES
 # =========================
