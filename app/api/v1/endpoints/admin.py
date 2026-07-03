@@ -28,6 +28,7 @@ from app.api.deps import (
 from app.models.package import Package
 from app.models.bookings import Booking
 from app.models.user import User
+from app.api.deps import require_admin
 
 
 from app.services.payment_service import (
