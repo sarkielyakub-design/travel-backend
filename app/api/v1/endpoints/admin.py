@@ -51,7 +51,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.package import Package
-from app.core.auth import require_admin
+from app.api.deps import require_admin
 
 router = APIRouter()
 
