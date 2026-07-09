@@ -1,8 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Date
 from sqlalchemy.sql import func
 import uuid
-
-from app.db.base import Base
+from app.db.session import Base
 
 
 class Booking(Base):
