@@ -17,10 +17,23 @@ def get_packages(db: Session = Depends(get_db)):
     }
 
 @router.get("/{package_id}")
-def get_package(package_id: int, db: Session = Depends(get_db)):
-    package = db.query(Package).filter(Package.id == package_id).first()
+def get_package(
+    package_id: int,
+    db: Session = Depends(get_db),
+):
+    package = (
+        db.query(Package)
+        .filter(Package.id == package_id)
+        .first()
+    )
 
     if not package:
-        raise HTTPException(404, "Not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Package not found",
+        )
 
-    return package
+    return {
+        "success": True,
+        "data": package,
+    }
