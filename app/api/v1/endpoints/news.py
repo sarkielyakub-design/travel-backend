@@ -201,7 +201,8 @@ async def update_news(
         "success": True,
         "message": "News updated successfully",
         "data": news,
-    }@router.delete("/{news_id}")
+    }
+@router.delete("/{news_id}")
 def delete_news(
     news_id: int,
     db: Session = Depends(get_db),
@@ -223,7 +224,8 @@ def delete_news(
     return {
         "success": True,
         "message": "News deleted successfully",
-    }@router.get("/public/latest")
+    }
+@router.get("/public/latest")
 def latest_news(db: Session = Depends(get_db)):
     news = (
         db.query(News)
@@ -248,7 +250,8 @@ def public_news(db: Session = Depends(get_db)):
     return {
         "success": True,
         "data": news,
-    }@router.get("/public/{slug}")
+    }
+@router.get("/public/{slug}")
 def get_news_by_slug(
     slug: str,
     db: Session = Depends(get_db),

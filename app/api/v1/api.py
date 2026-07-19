@@ -32,11 +32,21 @@ api_router.include_router(
 )
 
 api_router.include_router(
+    news.router,
+    prefix="/news",
+    tags=["Public News"],
+)
+
+api_router.include_router(
     gallery.router,
     prefix="/admin/gallery",
     tags=["Admin Gallery"],
 )
-
+api_router.include_router(
+    gallery.router,
+    prefix="/gallery",
+    tags=["Public Gallery"],
+)
 api_router.include_router(
     newsletter.router,
     prefix="/admin/newsletter",
