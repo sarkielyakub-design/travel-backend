@@ -49,10 +49,9 @@ api_router.include_router(
 )
 api_router.include_router(
     newsletter.router,
-    prefix="/admin/newsletter",
-    tags=["Admin Newsletter"],
+    prefix="/newsletter",
+    tags=["Public Newsletter"],
 )
-
 api_router.include_router(
     hero.router,
     prefix="/admin/hero",

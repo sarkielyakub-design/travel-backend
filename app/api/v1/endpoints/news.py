@@ -97,7 +97,8 @@ async def create_news(
         raise HTTPException(
             status_code=500,
             detail=str(e),
-        )@router.get("/")
+        )
+@router.get("/")
 def get_news(
     search: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -129,7 +130,8 @@ def get_news(
 
         "data": news,
 
-    }@router.get("/{news_id}")
+    }
+@router.get("/{news_id}")
 def get_news_by_id(
     news_id: int,
     db: Session = Depends(get_db),
@@ -238,7 +240,8 @@ def latest_news(db: Session = Depends(get_db)):
     return {
         "success": True,
         "data": news,
-    }@router.get("/public")
+    }
+@router.get("/public")
 def public_news(db: Session = Depends(get_db)):
     news = (
         db.query(News)
