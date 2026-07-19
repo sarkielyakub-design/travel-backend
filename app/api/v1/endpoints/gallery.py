@@ -68,7 +68,8 @@ async def create_gallery(
         raise HTTPException(
             status_code=500,
             detail=str(e),
-        )@router.get("/")
+        )
+@router.get("/")
 def get_gallery(
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
@@ -84,7 +85,8 @@ def get_gallery(
         "success": True,
         "total": len(gallery),
         "data": gallery,
-    }@router.get("/{gallery_id}")
+    }
+@router.get("/{gallery_id}")
 def get_gallery_by_id(
     gallery_id: int,
     db: Session = Depends(get_db),
@@ -104,7 +106,8 @@ def get_gallery_by_id(
     return {
         "success": True,
         "data": gallery,
-    }@router.put("/{gallery_id}")
+    }
+@router.put("/{gallery_id}")
 async def update_gallery(
     gallery_id: int,
 
@@ -165,7 +168,8 @@ async def update_gallery(
         "success": True,
         "message": "Gallery updated successfully.",
         "data": gallery,
-    }@router.delete("/{gallery_id}")
+    }
+@router.delete("/{gallery_id}")
 def delete_gallery(
     gallery_id: int,
     db: Session = Depends(get_db),
@@ -196,7 +200,8 @@ def delete_gallery(
     return {
         "success": True,
         "message": "Gallery deleted successfully.",
-    }@router.get("/public")
+    }
+@router.get("/public")
 def public_gallery(
     db: Session = Depends(get_db),
 ):
@@ -211,7 +216,8 @@ def public_gallery(
     return {
         "success": True,
         "data": gallery,
-    }@router.get("/public/category/{category}")
+    }
+@router.get("/public/category/{category}")
 def gallery_by_category(
     category: str,
     db: Session = Depends(get_db),
@@ -230,7 +236,8 @@ def gallery_by_category(
     return {
         "success": True,
         "data": gallery,
-    }@router.get("/public/featured")
+    }
+@router.get("/public/featured")
 def featured_gallery(
     db: Session = Depends(get_db),
 ):

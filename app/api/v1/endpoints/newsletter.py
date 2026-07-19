@@ -43,7 +43,8 @@ def subscribe(
         "success": True,
         "message": "Subscription successful.",
         "data": subscriber,
-    }@router.get("/")
+    }
+@router.get("/")
 def get_subscribers(
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
@@ -59,7 +60,8 @@ def get_subscribers(
         "success": True,
         "total": len(subscribers),
         "data": subscribers,
-    }@router.delete("/{subscriber_id}")
+    }
+@router.delete("/{subscriber_id}")
 def delete_subscriber(
     subscriber_id: int,
     db: Session = Depends(get_db),

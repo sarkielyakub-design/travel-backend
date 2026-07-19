@@ -27,102 +27,197 @@ def create_and_pay(
     user=Depends(get_current_user),
 ):
     try:
-        package = db.query(Package).filter(Package.id == package_id).first()
+        # =========================
+        # GET PACKAGE
+        # =========================
+        package = (
+            db.query(Package)
+            .filter(Package.id == package_id)
+            .with_for_update()
+            .first()
+        )
 
         if not package:
-            raise HTTPException(404, "Package not found")
+            raise HTTPException(
+                status_code=404,
+                detail="Package not found",
+            )
 
         if package.booked_slots >= package.total_slots:
-            raise HTTPException(400, "No available slots")
+            raise HTTPException(
+                status_code=400,
+                detail="No available slots",
+            )
 
-        # 🔒 Prevent duplicate pending (FIXED)
-        existing = db.query(Booking).filter(
-            Booking.user_id == user.id,
-            Booking.package_id == package.id,
-            Booking.status == "pending"
-        ).first()
+        # =========================
+        # CHECK EXISTING PENDING BOOKING
+        # =========================
+        existing = (
+            db.query(Booking)
+            .filter(
+                Booking.user_id == user.id,
+                Booking.package_id == package.id,
+                Booking.status == "pending",
+            )
+            .first()
+        )
 
         if existing:
+
             if existing.expires_at and existing.expires_at < datetime.utcnow():
                 existing.status = "cancelled"
                 db.commit()
+
             else:
                 return {
-                    "message": "Pending booking already exists",
+                    "success": True,
+                    "message": "Pending booking already exists.",
                     "booking_id": existing.id,
                     "authorization_url": existing.payment_url,
                     "reference": existing.payment_reference,
                 }
 
+        # =========================
+        # PAYMENT REFERENCE
+        # =========================
         reference = f"BOOK-{uuid.uuid4().hex}"
 
-        # 📅 Validate dates
+        # =========================
+        # VALIDATE DATES
+        # =========================
         try:
-            dob = datetime.strptime(data.date_of_birth, "%Y-%m-%d").date()
-            issue = datetime.strptime(data.passport_issue, "%Y-%m-%d").date()
-            expiry = datetime.strptime(data.passport_expiry, "%Y-%m-%d").date()
-        except:
-            raise HTTPException(400, "Invalid date format")
+            dob = datetime.strptime(
+                data.date_of_birth,
+                "%Y-%m-%d"
+            ).date()
 
-        amount_kobo = int(package.price * 100)
+            issue = datetime.strptime(
+                data.passport_issue,
+                "%Y-%m-%d"
+            ).date()
 
+            expiry = datetime.strptime(
+                data.passport_expiry,
+                "%Y-%m-%d"
+            ).date()
+
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid date format. Use YYYY-MM-DD.",
+            )
+
+        # =========================
+        # CREATE BOOKING
+        # =========================
         booking = Booking(
             user_id=user.id,
             package_id=package.id,
+
             surname=data.surname,
             first_name=data.first_name,
             given_names=data.given_names,
+
             nationality=data.nationality,
+
             email=data.email,
             phone=data.phone,
+
             passport_number=data.passport_number,
             place_of_birth=data.place_of_birth,
+
             date_of_birth=dob,
             passport_issue=issue,
             passport_expiry=expiry,
+
             status="pending",
+
             payment_reference=reference,
-            expires_at=datetime.utcnow() + timedelta(minutes=15)
+
+            expires_at=datetime.utcnow() + timedelta(minutes=15),
         )
 
         db.add(booking)
         db.commit()
         db.refresh(booking)
 
-        # 💳 INIT PAYSTACK
+        # =========================
+        # FLUTTERWAVE PAYMENT INITIALIZATION
+        # =========================
         payload = {
-            "email": booking.email,
-            "amount": amount_kobo,
-            "reference": reference,
-            "callback_url": f"{os.getenv('FRONTEND_URL')}/payment-success",
+            "tx_ref": reference,
+            "amount": str(package.price),
+            "currency": "NGN",
+            "redirect_url": (
+                f"{os.getenv('FRONTEND_URL')}"
+                f"/payment-success?reference={reference}"
+            ),
+            "customer": {
+                "email": booking.email,
+                "phonenumber": booking.phone,
+                "name": f"{booking.first_name} {booking.surname}",
+            },
+            "customizations": {
+                "title": "M.Y Hamdala Travel & Tour",
+                "description": f"Payment for {package.title}",
+            },
         }
 
         headers = {
-            "Authorization": f"Bearer {PAYSTACK_SECRET}",
+            "Authorization": f"Bearer {FLUTTERWAVE_SECRET_KEY}",
             "Content-Type": "application/json",
         }
 
-        response = requests.post(PAYSTACK_URL, json=payload, headers=headers).json()
+        flutterwave_response = requests.post(
+            FLUTTERWAVE_URL,
+            json=payload,
+            headers=headers,
+            timeout=30,
+        )
 
-        if not response.get("status"):
+        response = flutterwave_response.json()
+
+        if response.get("status") != "success":
+
             db.delete(booking)
             db.commit()
-            raise HTTPException(400, response.get("message"))
 
-        booking.payment_url = response["data"]["authorization_url"]
+            raise HTTPException(
+                status_code=400,
+                detail=response.get(
+                    "message",
+                    "Unable to initialize payment.",
+                ),
+            )
+
+        booking.payment_url = response["data"]["link"]
+
         db.commit()
+        db.refresh(booking)
 
         return {
+            "success": True,
+            "message": "Booking created successfully.",
             "booking_id": booking.id,
+            "reference": booking.payment_reference,
             "authorization_url": booking.payment_url,
-            "reference": reference,
         }
+
+    except HTTPException:
+        db.rollback()
+        raise
 
     except Exception as e:
         db.rollback()
-        logger.error(f"CREATE ERROR: {e}")
-        raise HTTPException(500, "Internal error")
 
+        logger.exception(
+            f"Booking creation failed: {str(e)}"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while creating the booking.",
+        )
 # =========================
 # 👤 USER BOOKINGS
 # =========================

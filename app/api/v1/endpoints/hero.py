@@ -1,3 +1,4 @@
+import traceback
 import cloudinary.uploader
 
 from fastapi import (
@@ -19,18 +20,32 @@ from app.api.deps import (
 from app.models.hero import Hero
 
 router = APIRouter()
+
+
+# =========================================================
+# PUBLIC HERO
+# =========================================================
 @router.get("/")
 def get_hero(
     db: Session = Depends(get_db),
 ):
-
     hero = db.query(Hero).first()
+
+    if hero is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Hero section not found."
+        )
 
     return {
         "success": True,
         "data": hero,
     }
-@router.put("/")
+
+
+# =========================================================
+# UPDATE HERO
+# =========================================================
 @router.put("/")
 async def update_hero(
     title: str = Form(...),
@@ -49,44 +64,60 @@ async def update_hero(
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
-    print("TITLE =", title)
+    try:
 
-    hero = db.query(Hero).first()
+        hero = db.query(Hero).first()
 
-    if hero is None:
-        hero = Hero()
-        db.add(hero)
+        if hero is None:
+            hero = Hero()
+            db.add(hero)
 
-    hero.title = title
-    hero.subtitle = subtitle
+        hero.title = title
+        hero.subtitle = subtitle
 
-    hero.primary_button_text = primary_button_text
-    hero.primary_button_link = primary_button_link
+        hero.primary_button_text = primary_button_text
+        hero.primary_button_link = primary_button_link
 
-    hero.secondary_button_text = secondary_button_text
-    hero.secondary_button_link = secondary_button_link
+        hero.secondary_button_text = secondary_button_text
+        hero.secondary_button_link = secondary_button_link
 
-    hero.booking_url = booking_url
+        hero.booking_url = booking_url
 
-    if file is not None:
+        # Upload new image if provided
+        if file is not None:
 
-        if hero.public_id:
-            cloudinary.uploader.destroy(hero.public_id)
+            # Delete old image
+            if hero.public_id:
+                try:
+                    cloudinary.uploader.destroy(hero.public_id)
+                except Exception:
+                    pass
 
-        result = cloudinary.uploader.upload(
-            file.file,
-            folder="hero",
-            resource_type="image",
+            result = cloudinary.uploader.upload(
+                file.file,
+                folder="hero",
+                resource_type="image",
+            )
+
+            hero.image_url = result.get("secure_url")
+            hero.public_id = result.get("public_id")
+
+        db.commit()
+        db.refresh(hero)
+
+        return {
+            "success": True,
+            "message": "Hero updated successfully.",
+            "data": hero,
+        }
+
+    except Exception as e:
+
+        db.rollback()
+
+        traceback.print_exc()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
         )
-
-        hero.image_url = result["secure_url"]
-        hero.public_id = result["public_id"]
-
-    db.commit()
-    db.refresh(hero)
-
-    return {
-        "success": True,
-        "message": "Hero updated successfully.",
-        "data": hero,
-    }
