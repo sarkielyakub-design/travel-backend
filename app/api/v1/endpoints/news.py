@@ -145,6 +145,32 @@ def get_news_by_slug(
         "success": True,
         "data": news,
     }       
+
+@router.get("/{news_id}")
+def get_news_by_id(
+    news_id: int,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+
+    news = db.query(News).filter(
+        News.id == news_id
+    ).first()
+
+    if not news:
+
+        raise HTTPException(
+            404,
+            "News not found",
+        )
+
+    return {
+
+        "success": True,
+
+        "data": news,
+
+    }
 @router.get("/")
 def get_news(
     search: Optional[str] = None,
@@ -174,31 +200,6 @@ def get_news(
         "success": True,
 
         "total": len(news),
-
-        "data": news,
-
-    }
-@router.get("/{news_id}")
-def get_news_by_id(
-    news_id: int,
-    db: Session = Depends(get_db),
-    admin=Depends(require_admin),
-):
-
-    news = db.query(News).filter(
-        News.id == news_id
-    ).first()
-
-    if not news:
-
-        raise HTTPException(
-            404,
-            "News not found",
-        )
-
-    return {
-
-        "success": True,
 
         "data": news,
 
