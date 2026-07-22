@@ -98,6 +98,53 @@ async def create_news(
             status_code=500,
             detail=str(e),
         )
+ @router.get("/public/latest")
+def latest_news(db: Session = Depends(get_db)):
+    news = (
+        db.query(News)
+        .filter(News.published == True)
+        .order_by(News.created_at.desc())
+        .limit(3)
+        .all()
+    )
+
+    return {
+        "success": True,
+        "data": news,
+    }
+@router.get("/public")
+def public_news(db: Session = Depends(get_db)):
+    news = (
+        db.query(News)
+        .filter(News.published == True)
+        .order_by(News.created_at.desc())
+        .all()
+    )
+
+    return {
+        "success": True,
+        "data": news,
+    }
+@router.get("/public/{slug}")
+def get_news_by_slug(
+    slug: str,
+    db: Session = Depends(get_db),
+):
+    news = db.query(News).filter(
+        News.slug == slug,
+        News.published == True,
+    ).first()
+
+    if not news:
+        raise HTTPException(404, "News not found")
+
+    news.views += 1
+    db.commit()
+
+    return {
+        "success": True,
+        "data": news,
+    }       
 @router.get("/")
 def get_news(
     search: Optional[str] = None,
@@ -226,51 +273,4 @@ def delete_news(
     return {
         "success": True,
         "message": "News deleted successfully",
-    }
-@router.get("/public/latest")
-def latest_news(db: Session = Depends(get_db)):
-    news = (
-        db.query(News)
-        .filter(News.published == True)
-        .order_by(News.created_at.desc())
-        .limit(3)
-        .all()
-    )
-
-    return {
-        "success": True,
-        "data": news,
-    }
-@router.get("/public")
-def public_news(db: Session = Depends(get_db)):
-    news = (
-        db.query(News)
-        .filter(News.published == True)
-        .order_by(News.created_at.desc())
-        .all()
-    )
-
-    return {
-        "success": True,
-        "data": news,
-    }
-@router.get("/public/{slug}")
-def get_news_by_slug(
-    slug: str,
-    db: Session = Depends(get_db),
-):
-    news = db.query(News).filter(
-        News.slug == slug,
-        News.published == True,
-    ).first()
-
-    if not news:
-        raise HTTPException(404, "News not found")
-
-    news.views += 1
-    db.commit()
-
-    return {
-        "success": True,
-        "data": news,
     }
