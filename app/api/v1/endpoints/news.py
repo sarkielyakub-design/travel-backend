@@ -98,7 +98,7 @@ async def create_news(
             status_code=500,
             detail=str(e),
         )
- @router.get("/public/latest")
+@router.get("/public/latest")
 def latest_news(db: Session = Depends(get_db)):
     news = (
         db.query(News)
