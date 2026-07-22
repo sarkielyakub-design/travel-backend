@@ -69,6 +69,61 @@ async def create_gallery(
             status_code=500,
             detail=str(e),
         )
+@router.get("/public")
+def public_gallery(
+    db: Session = Depends(get_db),
+):
+
+    gallery = (
+        db.query(Gallery)
+        .filter(Gallery.active == True)
+        .order_by(Gallery.created_at.desc())
+        .all()
+    )
+
+    return {
+        "success": True,
+        "data": gallery,
+    }
+@router.get("/public/category/{category}")
+def gallery_by_category(
+    category: str,
+    db: Session = Depends(get_db),
+):
+
+    gallery = (
+        db.query(Gallery)
+        .filter(
+            Gallery.category == category,
+            Gallery.active == True,
+        )
+        .order_by(Gallery.created_at.desc())
+        .all()
+    )
+
+    return {
+        "success": True,
+        "data": gallery,
+    }
+@router.get("/public/featured")
+def featured_gallery(
+    db: Session = Depends(get_db),
+):
+
+    gallery = (
+        db.query(Gallery)
+        .filter(
+            Gallery.featured == True,
+            Gallery.active == True,
+        )
+        .order_by(Gallery.created_at.desc())
+        .all()
+    )
+
+    return {
+        "success": True,
+        "data": gallery,
+    }    
 @router.get("/")
 def get_gallery(
     db: Session = Depends(get_db),
@@ -200,59 +255,4 @@ def delete_gallery(
     return {
         "success": True,
         "message": "Gallery deleted successfully.",
-    }
-@router.get("/public")
-def public_gallery(
-    db: Session = Depends(get_db),
-):
-
-    gallery = (
-        db.query(Gallery)
-        .filter(Gallery.active == True)
-        .order_by(Gallery.created_at.desc())
-        .all()
-    )
-
-    return {
-        "success": True,
-        "data": gallery,
-    }
-@router.get("/public/category/{category}")
-def gallery_by_category(
-    category: str,
-    db: Session = Depends(get_db),
-):
-
-    gallery = (
-        db.query(Gallery)
-        .filter(
-            Gallery.category == category,
-            Gallery.active == True,
-        )
-        .order_by(Gallery.created_at.desc())
-        .all()
-    )
-
-    return {
-        "success": True,
-        "data": gallery,
-    }
-@router.get("/public/featured")
-def featured_gallery(
-    db: Session = Depends(get_db),
-):
-
-    gallery = (
-        db.query(Gallery)
-        .filter(
-            Gallery.featured == True,
-            Gallery.active == True,
-        )
-        .order_by(Gallery.created_at.desc())
-        .all()
-    )
-
-    return {
-        "success": True,
-        "data": gallery,
     }
